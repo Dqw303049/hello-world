@@ -1,7 +1,7 @@
 {
   "name": "guishan-mountain-town",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -10,7 +10,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --experimental-strip-types tests/game.test.ts",
     "test:standalone": "node tests/standalone-smoke.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "pack:playable": "npm run build:standalone && node scripts/package-playable.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.6",

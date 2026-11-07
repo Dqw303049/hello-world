@@ -1,7 +1,7 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import type { ComponentRef, CSSProperties } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, MapControls, RoundedBox } from "@react-three/drei";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useFrame } from "@react-three/fiber";
+import { Html, RoundedBox } from "@react-three/drei";
 import {
   BedDouble,
   Coffee,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import * as THREE from "three";
 import { LOCATIONS } from "./locations";
+import { riverZ } from "./world";
 import type { LocationId } from "./game";
 
 const MARKER_ICONS = {
@@ -24,20 +25,13 @@ const MARKER_ICONS = {
   square: TreeDeciduous,
   camp: Coffee,
 };
-export interface SceneCommand {
-  type: "in" | "out" | "reset";
-  nonce: number;
-}
-interface SceneProps {
+interface SceneryProps {
   selected: LocationId | null;
   onSelect: (id: LocationId) => void;
-  command: SceneCommand | null;
   renovated: boolean;
-  onReady: () => void;
-  onUnavailable: () => void;
 }
 
-function Box({
+export function Box({
   position,
   size,
   color,
@@ -160,7 +154,12 @@ function House({
         ? "#e6c7a7"
         : "#f2ead6";
   return (
-    <group position={position} rotation={[0, rotation, 0]} scale={scale}>
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      scale={scale}
+      userData={{ occluder: true }}
+    >
       <RoundedBox
         args={[4.3, 0.2, 3.9]}
         radius={0.07}
@@ -321,7 +320,7 @@ function Tree({
   variant?: number;
 }) {
   return (
-    <group position={position} scale={size}>
+    <group position={position} scale={size} userData={{ occluder: true }}>
       <mesh position={[0, 0.75, 0]} castShadow>
         <cylinderGeometry args={[0.09, 0.16, 1.5, 6]} />
         <meshStandardMaterial color="#8b7955" />
@@ -361,7 +360,7 @@ function Bamboo({
   size?: number;
 }) {
   return (
-    <group position={position} scale={size}>
+    <group position={position} scale={size} userData={{ occluder: true }}>
       {[0, 1, 2, 3].map((i) => (
         <group
           key={i}
@@ -401,12 +400,9 @@ function Terrain() {
     outline.quadraticCurveTo(7, -18, -4, -15);
     outline.quadraticCurveTo(-16, -16, -20, -11);
     const water = new THREE.Shape();
-    water.moveTo(-23, -0.5);
-    water.bezierCurveTo(-12, 4.2, -7, 1.1, 0, -0.8);
-    water.bezierCurveTo(9, -3, 13, 1.5, 23, -0.5);
-    water.lineTo(23, -3);
-    water.bezierCurveTo(13, -1, 9, -5.3, 0, -3.3);
-    water.bezierCurveTo(-7, -1.4, -12, 1.7, -23, -3);
+    water.moveTo(-23, -(riverZ(-23) - 1.25));
+    for (let x = -22.5; x <= 23; x += 0.5) water.lineTo(x, -(riverZ(x) - 1.25));
+    for (let x = 23; x >= -23; x -= 0.5) water.lineTo(x, -(riverZ(x) + 1.25));
     water.closePath();
     return [
       new THREE.ExtrudeGeometry(outline, {
@@ -751,55 +747,6 @@ function Camp() {
   );
 }
 
-function Villager({
-  position,
-  color = "#6d8592",
-  phase = 0,
-  moving = false,
-}: {
-  position: [number, number, number];
-  color?: string;
-  phase?: number;
-  moving?: boolean;
-}) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame(({ clock }) => {
-    if (!ref.current || !moving) return;
-    ref.current.position.x =
-      position[0] + Math.sin(clock.elapsedTime * 0.15 + phase) * 3;
-    ref.current.position.y =
-      position[1] + Math.abs(Math.sin(clock.elapsedTime * 3 + phase)) * 0.025;
-    ref.current.rotation.y =
-      Math.cos(clock.elapsedTime * 0.15 + phase) > 0
-        ? Math.PI / 2
-        : -Math.PI / 2;
-  });
-  return (
-    <group ref={ref} position={position}>
-      <mesh position={[0, 0.9, 0]} castShadow>
-        <sphereGeometry args={[0.16, 8, 6]} />
-        <meshStandardMaterial color="#d5ad86" />
-      </mesh>
-      <mesh position={[0, 0.6, 0]} castShadow>
-        <cylinderGeometry args={[0.15, 0.2, 0.4, 6]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {[-0.09, 0.09].map((x) => (
-        <Box
-          key={x}
-          position={[x, 0.29, 0]}
-          size={[0.11, 0.35, 0.13]}
-          color="#575f57"
-        />
-      ))}
-      <mesh position={[0, 1.02, 0]}>
-        <coneGeometry args={[0.28, 0.16, 8]} />
-        <meshStandardMaterial color="#cfb880" />
-      </mesh>
-    </group>
-  );
-}
-
 function Clouds() {
   const ref = useRef<THREE.Group>(null);
   useFrame(({ clock }) => {
@@ -839,83 +786,7 @@ function Clouds() {
   );
 }
 
-function CameraRig({
-  command,
-  onReady,
-}: {
-  command: SceneCommand | null;
-  onReady: () => void;
-}) {
-  const controls = useRef<ComponentRef<typeof MapControls>>(null);
-  const { camera, size, gl } = useThree();
-  const baselineZoom = useRef<number | null>(null);
-  useEffect(() => {
-    const nextBaseline = Math.min(size.width / 42, size.height / 29);
-    const orthographic = camera as THREE.OrthographicCamera;
-    orthographic.zoom = baselineZoom.current
-      ? (orthographic.zoom * nextBaseline) / baselineZoom.current
-      : nextBaseline;
-    baselineZoom.current = nextBaseline;
-    orthographic.updateProjectionMatrix();
-  }, [camera, size]);
-  useEffect(() => {
-    if (!command) return;
-    const orthographic = camera as THREE.OrthographicCamera;
-    if (command.type === "reset") {
-      camera.position.set(29, 30, 37);
-      controls.current?.target.set(0, 0, 0);
-      orthographic.zoom = baselineZoom.current ?? 28;
-    } else {
-      orthographic.zoom = THREE.MathUtils.clamp(
-        orthographic.zoom * (command.type === "in" ? 1.2 : 1 / 1.2),
-        11,
-        65,
-      );
-    }
-    orthographic.updateProjectionMatrix();
-    controls.current?.update();
-  }, [command, camera]);
-  useEffect(() => {
-    const frame = requestAnimationFrame(onReady);
-    const canvas = gl.domElement;
-    const prevent = (e: Event) => e.preventDefault();
-    canvas.addEventListener("contextmenu", prevent);
-    return () => {
-      cancelAnimationFrame(frame);
-      canvas.removeEventListener("contextmenu", prevent);
-    };
-  }, [gl, onReady]);
-  useFrame(() => {
-    if (!controls.current) return;
-    const target = controls.current.target;
-    const x = THREE.MathUtils.clamp(target.x, -17, 17);
-    const z = THREE.MathUtils.clamp(target.z, -13, 13);
-    if (x !== target.x || z !== target.z) {
-      camera.position.x += x - target.x;
-      camera.position.z += z - target.z;
-      target.set(x, 0, z);
-    }
-  });
-  return (
-    <MapControls
-      ref={controls}
-      makeDefault
-      enableDamping
-      dampingFactor={0.08}
-      minZoom={11}
-      maxZoom={65}
-      minPolarAngle={0.25}
-      maxPolarAngle={Math.PI / 2.6}
-      screenSpacePanning={false}
-    />
-  );
-}
-
-function Town({
-  selected,
-  onSelect,
-  renovated,
-}: Pick<SceneProps, "selected" | "onSelect" | "renovated">) {
+function Town({ selected, onSelect, renovated }: SceneryProps) {
   const [hover, setHover] = useState<LocationId | null>(null);
   useEffect(() => {
     document.body.style.cursor = hover ? "pointer" : "";
@@ -1016,11 +887,6 @@ function Town({
           <meshStandardMaterial color="#b0b5a2" flatShading />
         </mesh>
       ))}
-      <Villager position={[-4, 1, 4.7]} phase={0} moving />
-      <Villager position={[7, 1, 4.9]} phase={1} color="#bb8064" moving />
-      <Villager position={[-1.8, 1, -0.8]} color="#b5a16b" />
-      <Villager position={[-9.5, 1.2, -5.8]} color="#839174" />
-      <Villager position={[5.5, 1, -3.7]} color="#c2ab77" phase={2} moving />
       <Clouds />
       {LOCATIONS.map((location) => {
         const Icon = MARKER_ICONS[location.id];
@@ -1102,56 +968,4 @@ function Town({
   );
 }
 
-export default function TownScene(props: SceneProps) {
-  return (
-    <Canvas
-      orthographic
-      camera={{ position: [29, 30, 37], zoom: 28, near: 0.1, far: 200 }}
-      shadows
-      dpr={[1, 1.6]}
-      gl={{
-        antialias: true,
-        powerPreference: "high-performance",
-        alpha: false,
-      }}
-      onCreated={({ gl }) => {
-        gl.setClearColor("#e3e6d6");
-        gl.domElement.addEventListener("webglcontextlost", (event) => {
-          event.preventDefault();
-          props.onUnavailable();
-        });
-      }}
-      fallback={
-        <div className="canvas-fallback">
-          <h2>山镇正在等你</h2>
-          <p>当前设备未能启动 3D 地图。你仍可从下方地点菜单探索小镇。</p>
-        </div>
-      }
-    >
-      <fog attach="fog" args={["#e3e6d6", 52, 115]} />
-      <ambientLight intensity={1.25} color="#fff3dc" />
-      <hemisphereLight args={["#e8f1e2", "#a6a383", 1.8]} />
-      <directionalLight
-        position={[-18, 32, 15]}
-        intensity={2.8}
-        color="#fff2d7"
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-32}
-        shadow-camera-right={32}
-        shadow-camera-top={28}
-        shadow-camera-bottom={-28}
-        shadow-normalBias={0.04}
-        shadow-bias={-0.00015}
-      />
-      <Suspense fallback={null}>
-        <Town
-          selected={props.selected}
-          onSelect={props.onSelect}
-          renovated={props.renovated}
-        />
-      </Suspense>
-      <CameraRig command={props.command} onReady={props.onReady} />
-    </Canvas>
-  );
-}
+export const TownScenery = memo(Town);

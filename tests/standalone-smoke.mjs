@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 
 // This managed Chromium disallows file:// navigation. Load the exact same
 // standalone document once through loopback, then disconnect the browser.
@@ -50,6 +50,7 @@ try {
   await page
     .getByRole("button", { name: "前往云边茶园" })
     .waitFor({ timeout: 45000 });
+  await expect(page.getByText("沿着山路，快到家了…")).toBeHidden();
   assert.equal(
     await page
       .locator("canvas")
@@ -64,19 +65,27 @@ try {
     path: new URL("../test-results/guishan-offline.png", import.meta.url)
       .pathname,
   });
-  await page.getByRole("button", { name: "打开云边茶园" }).click();
-  await page.getByRole("button", { name: "采一篓秋茶" }).click();
-  assert.equal(await page.getByTestId("money").textContent(), "¥173");
-  assert.equal(await page.getByTestId("energy").textContent(), "62");
+  await page.keyboard.press("e");
+  await page.getByRole("button", { name: "推门进入小屋" }).click();
+  await expect(page.getByTestId("scene")).toHaveText("home");
+  await page.getByRole("button", { name: "走到小屋 · 灶台", exact: true }).click();
+  await expect.poll(async () => {
+    const [x,z] = (await page.getByTestId("player-position").textContent()).split(",").map(Number);
+    return Math.hypot(x - 2.15, z + 0.8);
+  }, { timeout: 25000 }).toBeLessThan(0.25);
+  await page.keyboard.press("e");
+  await page.getByRole("button", { name: "做一份家常饭", exact: true }).click();
+  await expect(page.getByTestId("money")).toHaveText("¥122", { timeout: 20000 });
   await context.setOffline(false);
   await page.reload();
   await context.setOffline(true);
   await page.getByTestId("money").waitFor();
-  assert.equal(await page.getByTestId("money").textContent(), "¥173");
+  assert.equal(await page.getByTestId("money").textContent(), "¥122");
+  assert.equal(await page.getByTestId("scene").textContent(), "home");
   assert.deepEqual(errors, []);
   assert.deepEqual(remoteRequests, []);
   console.log(
-    "Standalone smoke passed: one embedded HTML document, offline WebGL2 play, tea income, refreshed save, zero external resource requests or page errors. Direct file:// navigation is unavailable under this managed browser policy.",
+    "Role-life standalone passed: offline WebGL2, physical navigation into home and to stove, cooking settlement, refreshed location/save, no external resource requests or page errors. Managed browser policy still disallows direct file:// navigation.",
   );
 } finally {
   await browser?.close();
